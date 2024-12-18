@@ -52,6 +52,6 @@ def parse_wa_file(wa_file_path, output_csv_path):
         print('CSV saved')
 
 
-wa_file_path = '.wa'
-output_csv_path = '.csv'
+wa_file_path = '../data/Semeval2016/test/test_goldStandard/STSint.testinput.images.wa'
+output_csv_path = '../data/Semeval2016/test/test_goldStandard/STSint.testinput.images.csv'
 parse_wa_file(wa_file_path, output_csv_path)

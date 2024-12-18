@@ -1,40 +1,67 @@
-from transformers import BertTokenizer, BertForSequenceClassification
-import torch
+from transformers import AutoTokenizer
+import pandas as pd
+from transformers import RobertaForSequenceClassification
+from transformers import Trainer, TrainingArguments
+from datasets import Dataset
+from sklearn.metrics import mean_squared_error
 
-# Load model and tokenizer
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-model = BertForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=3)  # Adjust labels
 
-# Define mapping for alignment types
-alignment_labels = {"EQUI": 0, "SPE1_FACT": 1, "NOALI": 2}
+tokenizer = AutoTokenizer.from_pretrained("roberta-base")
 
-# Example chunks and alignments
-chunks_sentence1 = ["Former Nazi death camp guard Demjanjuk", "dead", "at 91"]
-chunks_sentence2 = ["John Demjanjuk", "convicted Nazi death camp guard", "dies aged 91"]
-alignments = [
-    (["at 91"], ["aged 91"], "EQUI"),
-    (["Former Nazi death camp guard Demjanjuk"], ["John Demjanjuk convicted Nazi death camp guard"], "SPE1_FACT"),
-    (["dead"], ["dies"], "EQUI")
-]
+def preprocess_function(examples):
+    # Combine x1, x2, sentence1, sentence2 for context-aware training
+    inputs = [
+        f"{row['x1']} [SEP] {row['x2']} [CLS] {row['sentence1']} [SEP] {row['sentence2']}"
+        for _, row in examples.iterrows()
+    ]
+    labels = examples['y_score'].tolist()  # For regression
+    return tokenizer(inputs, padding=True, truncation=True, max_length=512, return_tensors="pt"), labels
 
-# Prepare inputs and labels
-inputs = []
-labels = []
-for chunk1, chunk2, label in alignments:
-    pair = f"[CLS] {chunk1[0]} [SEP] {chunk2[0]} [SEP]"
-    tokenized = tokenizer(pair, padding="max_length", max_length=128, truncation=True, return_tensors="pt")
-    inputs.append(tokenized)
-    labels.append(alignment_labels[label])
 
-# Convert to tensors
-input_ids = torch.cat([i["input_ids"] for i in inputs])
-attention_masks = torch.cat([i["attention_mask"] for i in inputs])
-segment_ids = torch.cat([i["token_type_ids"] for i in inputs])
-labels = torch.tensor(labels)
 
-# Model input
-outputs = model(input_ids, attention_mask=attention_masks, token_type_ids=segment_ids, labels=labels)
-loss, logits = outputs.loss, outputs.logits
+train_df = pd.read_csv("train.csv")
+valid_df = pd.read_csv("valid.csv")
+train_data = preprocess_function(train_df)
+valid_data = preprocess_function(valid_df)
 
-# Prediction
-predicted_labels = torch.argmax(logits, dim=1)
+model = RobertaForSequenceClassification.from_pretrained("roberta-base", num_labels=1)  # Regression
+
+train_dataset = Dataset.from_pandas(train_df)
+valid_dataset = Dataset.from_pandas(valid_df)
+
+def compute_metrics(eval_pred):
+    predictions, labels = eval_pred
+    predictions = predictions.squeeze()  # Adjust for regression output
+    return {"mse": mean_squared_error(labels, predictions)}
+
+# Define training arguments
+training_args = TrainingArguments(
+    output_dir="./results",
+    evaluation_strategy="epoch",
+    learning_rate=2e-5,
+    per_device_train_batch_size=16,
+    per_device_eval_batch_size=16,
+    num_train_epochs=3,
+    weight_decay=0.01,
+    save_total_limit=2,
+    logging_dir="./logs",
+    logging_steps=50,
+)
+
+# Initialize Trainer
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=valid_dataset,
+    tokenizer=tokenizer,
+    compute_metrics=compute_metrics,
+)
+
+trainer.train()
+
+results = trainer.evaluate(eval_dataset=valid_dataset)
+print(results)
+
+model.save_pretrained("./trained_roberta")
+tokenizer.save_pretrained("./trained_roberta")
