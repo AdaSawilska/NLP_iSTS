@@ -1,54 +1,60 @@
-from transformers import AutoTokenizer
-import pandas as pd
-from transformers import RobertaForSequenceClassification
-from transformers import Trainer, TrainingArguments
+import torch
+from transformers import AutoTokenizer, RobertaForSequenceClassification, Trainer, TrainingArguments
 from datasets import Dataset
+import pandas as pd
 from sklearn.metrics import mean_squared_error
 
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 tokenizer = AutoTokenizer.from_pretrained("roberta-base")
 
 def preprocess_function(examples):
-    # Combine x1, x2, sentence1, sentence2 for context-aware training
     inputs = [
-        f"{row['x1']} [SEP] {row['x2']} [CLS] {row['sentence1']} [SEP] {row['sentence2']}"
+        f"[CLS] {row['x1']} [SEP] {row['x2']} [SEP] {row['sentence1']} [SEP] {row['sentence2']} [SEP]"
         for _, row in examples.iterrows()
     ]
-    labels = examples['y_score'].tolist()  # For regression
-    return tokenizer(inputs, padding=True, truncation=True, max_length=512, return_tensors="pt"), labels
-
-
-
-train_df = pd.read_csv("train.csv")
-valid_df = pd.read_csv("valid.csv")
-train_data = preprocess_function(train_df)
-valid_data = preprocess_function(valid_df)
-
-model = RobertaForSequenceClassification.from_pretrained("roberta-base", num_labels=1)  # Regression
-
-train_dataset = Dataset.from_pandas(train_df)
-valid_dataset = Dataset.from_pandas(valid_df)
+    tokenized_inputs = tokenizer(inputs,
+                                 padding=True,
+                                 truncation=True,
+                                 max_length=256)
+    tokenized_inputs['labels'] = examples['y_score'].tolist()  # Add regression labels
+    return tokenized_inputs
 
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
     predictions = predictions.squeeze()  # Adjust for regression output
     return {"mse": mean_squared_error(labels, predictions)}
 
-# Define training arguments
+
+train_path = 'data/Semeval2016/train/train_healines.csv'
+valid_path = 'data/Semeval2016/train/validation_healines.csv'
+train_df = pd.read_csv(train_path)
+valid_df = pd.read_csv(valid_path)
+
+train_dataset = Dataset.from_pandas(train_df)
+valid_dataset = Dataset.from_pandas(valid_df)
+
+train_dataset = train_dataset.map(lambda x: preprocess_function(train_df), batched=False)
+valid_dataset = valid_dataset.map(lambda x: preprocess_function(valid_df), batched=False)
+
+model = RobertaForSequenceClassification.from_pretrained("roberta-base", num_labels=1)
+# model.to(device)
+
 training_args = TrainingArguments(
     output_dir="./results",
-    evaluation_strategy="epoch",
+    eval_strategy="epoch",
     learning_rate=2e-5,
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=16,
+    per_device_train_batch_size=4,
+    per_device_eval_batch_size=4,
     num_train_epochs=3,
     weight_decay=0.01,
     save_total_limit=2,
     logging_dir="./logs",
     logging_steps=50,
+    remove_unused_columns=False,
+    gradient_accumulation_steps=2,
+    fp16=torch.cuda.is_available(),
 )
 
-# Initialize Trainer
 trainer = Trainer(
     model=model,
     args=training_args,
@@ -58,10 +64,11 @@ trainer = Trainer(
     compute_metrics=compute_metrics,
 )
 
+# Train and evaluate
 trainer.train()
-
 results = trainer.evaluate(eval_dataset=valid_dataset)
 print(results)
 
+# Save model and tokenizer
 model.save_pretrained("./trained_roberta")
 tokenizer.save_pretrained("./trained_roberta")
