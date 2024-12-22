@@ -1,13 +1,18 @@
 import torch
-from transformers import AutoTokenizer, RobertaForSequenceClassification, Trainer, TrainingArguments
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
 from datasets import Dataset
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
 import numpy as np
 from transformers import DataCollatorWithPadding
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-tokenizer = AutoTokenizer.from_pretrained("roberta-base")
+# Set memory optimization settings
+torch.cuda.empty_cache()
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# MODEL_NAME = "sentence-transformers/all-roberta-large-v1"
+MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
 
@@ -23,12 +28,12 @@ def preprocess_function(examples):
         )
     ]
 
-    # Tokenize all texts at once
+    # Tokenize all texts at once with reduced max_length
     tokenized = tokenizer(
         texts,
         padding=True,
         truncation=True,
-        max_length=512,
+        max_length=256,  # Reduced from 512
         return_tensors=None
     )
 
@@ -72,9 +77,9 @@ train_dataset = prepare_dataset('data/Semeval2016/train/training.csv')
 valid_dataset = prepare_dataset('data/Semeval2016/train/validation.csv')
 
 # Initialize model for classification
-model = RobertaForSequenceClassification.from_pretrained(
-    "roberta-base",
-    num_labels=6,  # 0 to 5 inclusive
+model = AutoModelForSequenceClassification.from_pretrained(
+    MODEL_NAME,
+    num_labels=6,
     problem_type="single_label_classification"
 )
 
@@ -90,16 +95,17 @@ def compute_metrics(eval_pred):
     }
 
 
-# Define training arguments
+# Define training arguments with memory optimizations
 training_args = TrainingArguments(
     output_dir="./results",
     eval_strategy="steps",
     eval_steps=100,
     save_strategy="steps",
     save_steps=100,
-    learning_rate=2e-5,
-    per_device_train_batch_size=8,
-    per_device_eval_batch_size=8,
+    learning_rate=1e-5,
+    per_device_train_batch_size=2,  # Reduced batch size
+    per_device_eval_batch_size=2,  # Reduced batch size
+    gradient_accumulation_steps=4,  # Added gradient accumulation
     num_train_epochs=3,
     weight_decay=0.01,
     save_total_limit=2,
@@ -107,7 +113,10 @@ training_args = TrainingArguments(
     logging_steps=50,
     load_best_model_at_end=True,
     metric_for_best_model="f1_weighted",
-    greater_is_better=True
+    greater_is_better=True,
+    fp16=True,  # Mixed precision training
+    gradient_checkpointing=True,  # Enable gradient checkpointing
+    optim="adamw_torch"  # Use PyTorch's AdamW implementation
 )
 
 # Initialize trainer
@@ -126,5 +135,5 @@ results = trainer.evaluate()
 print(results)
 
 # Save model and tokenizer
-model.save_pretrained("./trained_roberta")
-tokenizer.save_pretrained("./trained_roberta")
+model.save_pretrained("./trained_sroberta")
+tokenizer.save_pretrained("./trained_sroberta")
