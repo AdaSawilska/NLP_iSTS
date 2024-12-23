@@ -6,9 +6,8 @@ from sklearn.metrics import accuracy_score, f1_score
 import numpy as np
 from transformers import DataCollatorWithPadding
 
-# Set memory optimization settings
 torch.cuda.empty_cache()
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 # MODEL_NAME = "sentence-transformers/all-roberta-large-v1"
 MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
@@ -33,7 +32,7 @@ def preprocess_function(examples):
         texts,
         padding=True,
         truncation=True,
-        max_length=256,  # Reduced from 512
+        max_length=512,
         return_tensors=None
     )
 
@@ -103,10 +102,11 @@ training_args = TrainingArguments(
     save_strategy="steps",
     save_steps=100,
     learning_rate=1e-5,
-    per_device_train_batch_size=2,  # Reduced batch size
-    per_device_eval_batch_size=2,  # Reduced batch size
-    gradient_accumulation_steps=4,  # Added gradient accumulation
-    num_train_epochs=3,
+    per_device_train_batch_size=4,
+    per_device_eval_batch_size=4,
+    gradient_accumulation_steps=8,
+    num_train_epochs=50,
+    warmup_ratio=0.1,
     weight_decay=0.01,
     save_total_limit=2,
     logging_dir="./logs",
@@ -114,9 +114,9 @@ training_args = TrainingArguments(
     load_best_model_at_end=True,
     metric_for_best_model="f1_weighted",
     greater_is_better=True,
-    fp16=True,  # Mixed precision training
-    gradient_checkpointing=True,  # Enable gradient checkpointing
-    optim="adamw_torch"  # Use PyTorch's AdamW implementation
+    fp16=True,
+    gradient_checkpointing=True,
+    optim="adamw_torch"
 )
 
 # Initialize trainer
