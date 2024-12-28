@@ -8,13 +8,6 @@ from transformers import DataCollatorWithPadding
 
 torch.cuda.empty_cache()
 
-
-# MODEL_NAME = "sentence-transformers/all-roberta-large-v1"
-MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-
-
 def preprocess_function(examples):
     # Create text pairs by combining chunks and sentences
     texts = [
@@ -70,19 +63,6 @@ def prepare_dataset(file_path):
 
     return processed_dataset
 
-
-# Prepare datasets
-train_dataset = prepare_dataset('data/Semeval2016/train/training.csv')
-valid_dataset = prepare_dataset('data/Semeval2016/train/validation.csv')
-
-# Initialize model for classification
-model = AutoModelForSequenceClassification.from_pretrained(
-    MODEL_NAME,
-    num_labels=6,
-    problem_type="single_label_classification"
-)
-
-
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
     predictions = np.argmax(predictions, axis=1)
@@ -94,46 +74,63 @@ def compute_metrics(eval_pred):
     }
 
 
-# Define training arguments with memory optimizations
-training_args = TrainingArguments(
-    output_dir="./results",
-    eval_strategy="steps",
-    eval_steps=100,
-    save_strategy="steps",
-    save_steps=100,
-    learning_rate=1e-5,
-    per_device_train_batch_size=4,
-    per_device_eval_batch_size=4,
-    gradient_accumulation_steps=8,
-    num_train_epochs=50,
-    warmup_ratio=0.1,
-    weight_decay=0.01,
-    save_total_limit=2,
-    logging_dir="./logs",
-    logging_steps=50,
-    load_best_model_at_end=True,
-    metric_for_best_model="f1_weighted",
-    greater_is_better=True,
-    fp16=True,
-    gradient_checkpointing=True,
-    optim="adamw_torch"
-)
+if __name__ == '__main__':
+    # MODEL_NAME = "sentence-transformers/all-roberta-large-v1"
+    MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-# Initialize trainer
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=valid_dataset,
-    data_collator=data_collator,
-    compute_metrics=compute_metrics,
-)
+    # Prepare datasets
+    train_dataset = prepare_dataset('data/Semeval2016/train/training.csv')
+    valid_dataset = prepare_dataset('data/Semeval2016/train/validation.csv')
 
-# Train and evaluate
-trainer.train()
-results = trainer.evaluate()
-print(results)
+    # Initialize model for classification
+    model = AutoModelForSequenceClassification.from_pretrained(
+        MODEL_NAME,
+        num_labels=6,
+        problem_type="single_label_classification"
+    )
 
-# Save model and tokenizer
-model.save_pretrained("./trained_sroberta")
-tokenizer.save_pretrained("./trained_sroberta")
+    # Define training arguments with memory optimizations
+    training_args = TrainingArguments(
+        output_dir="./results",
+        eval_strategy="steps",
+        eval_steps=100,
+        save_strategy="steps",
+        save_steps=100,
+        learning_rate=1e-5,
+        per_device_train_batch_size=4,
+        per_device_eval_batch_size=4,
+        gradient_accumulation_steps=8,
+        num_train_epochs=50,
+        warmup_ratio=0.1,
+        weight_decay=0.01,
+        save_total_limit=2,
+        logging_dir="./logs",
+        logging_steps=50,
+        load_best_model_at_end=True,
+        metric_for_best_model="f1_weighted",
+        greater_is_better=True,
+        fp16=True,
+        gradient_checkpointing=True,
+        optim="adamw_torch"
+    )
+
+    # Initialize trainer
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=valid_dataset,
+        data_collator=data_collator,
+        compute_metrics=compute_metrics,
+    )
+
+    # Train and evaluate
+    trainer.train()
+    results = trainer.evaluate()
+    print(results)
+
+    # Save model and tokenizer
+    model.save_pretrained("./trained_sroberta")
+    tokenizer.save_pretrained("./trained_sroberta")
