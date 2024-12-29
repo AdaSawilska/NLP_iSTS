@@ -1,12 +1,87 @@
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
+from transformers import AutoTokenizer, AutoModel, AutoModelForSequenceClassification, Trainer, TrainingArguments
 from datasets import Dataset
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
 import numpy as np
 from transformers import DataCollatorWithPadding
+from torch import nn
+from typing import Optional, Tuple, Union
+from transformers.modeling_outputs import SequenceClassifierOutput
 
-torch.cuda.empty_cache()
+class RobertaForMultiTaskClassification(nn.Module):
+    def __init__(self, model_name, num_score_labels=6, num_type_labels=4):
+        super().__init__()
+        # Load the base RoBERTa model
+        self.roberta = AutoModel.from_pretrained(model_name)
+
+        # Get the hidden size from the model config
+        hidden_size = self.roberta.config.hidden_size
+
+        # Separate classification heads for score and type
+        self.score_classifier = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_size, num_score_labels)
+        )
+
+        self.type_classifier = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_size, num_type_labels)
+        )
+
+    def gradient_checkpointing_enable(self, **kwargs):
+        self.roberta.gradient_checkpointing_enable()
+
+    def forward(
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            type_labels: Optional[torch.LongTensor] = None,
+            return_dict: Optional[bool] = None,
+    ) -> Union[Tuple, SequenceClassifierOutput]:
+        # Get RoBERTa outputs
+        outputs = self.roberta(
+            input_ids,
+            attention_mask=attention_mask,
+            return_dict=True
+        )
+
+        # Get the [CLS] token output
+        sequence_output = outputs.last_hidden_state[:, 0, :]
+
+        # Get predictions for both tasks
+        score_logits = self.score_classifier(sequence_output)
+        type_logits = self.type_classifier(sequence_output)
+
+        loss = None
+        if labels is not None and type_labels is not None:
+            loss_fct = nn.CrossEntropyLoss()
+            score_loss = loss_fct(score_logits.view(-1, score_logits.size(-1)), labels.view(-1))
+            type_loss = loss_fct(type_logits.view(-1, type_logits.size(-1)), type_labels.view(-1))
+            # Combined loss (you can adjust the weights if needed)
+            loss = score_loss + type_loss
+
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=(score_logits, type_logits),
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+
+    def save_pretrained(self, path):
+        # Save the model
+        self.roberta.save_pretrained(path)
+        # Save the classification heads
+        torch.save({
+            'score_classifier': self.score_classifier.state_dict(),
+            'type_classifier': self.type_classifier.state_dict()
+        }, f"{path}/classification_heads.pt")
+
 
 def preprocess_function(examples):
     # Create text pairs by combining chunks and sentences
@@ -20,7 +95,7 @@ def preprocess_function(examples):
         )
     ]
 
-    # Tokenize all texts at once with reduced max_length
+    # Tokenize all texts at once
     tokenized = tokenizer(
         texts,
         padding=True,
@@ -29,8 +104,9 @@ def preprocess_function(examples):
         return_tensors=None
     )
 
-    # Convert scores to integer labels
+    # Convert scores and types to integer labels
     tokenized["labels"] = [int(score) for score in examples["y_score"]]
+    tokenized["type_labels"] = [int(type_) for type_ in examples["y_type"]]
 
     return tokenized
 
@@ -44,11 +120,19 @@ def prepare_dataset(file_path):
     df["x2"] = df["x2"].fillna("EMPTY").astype(str)
     df["sentence1"] = df["sentence1"].fillna("EMPTY").astype(str)
     df["sentence2"] = df["sentence2"].fillna("EMPTY").astype(str)
+
+    # Process score labels
     df["y_score"] = df["y_score"].replace("NIL", 0).astype(float)
     df['y_score'] = pd.to_numeric(df['y_score'], errors='coerce')
-    df.dropna(subset=['y_score'], inplace=True)
 
-    # Round float scores to nearest integer if necessary
+    # Process type labels (assuming categorical encoding)
+    type_mapping = {'EQUI': 0, 'OPPO': 1, 'SPE1': 2, 'SPE2': 3,  'SIMI':4, 'REL':5, 'NOALI':6, 'ALIC':7}
+    df['y_type'] = df['y_type'].map(type_mapping)
+
+    # Drop rows with missing values
+    df.dropna(subset=['y_score', 'y_type'], inplace=True)
+
+    # Round float scores to nearest integer
     df['y_score'] = df['y_score'].round().astype(int)
 
     # Convert to dataset
@@ -63,20 +147,38 @@ def prepare_dataset(file_path):
 
     return processed_dataset
 
+
+class MultiTaskTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        labels = inputs.pop("labels")
+        type_labels = inputs.pop("type_labels")
+        outputs = model(**inputs, labels=labels, type_labels=type_labels)
+        loss = outputs.loss
+        return (loss, outputs) if return_outputs else loss
+
+
 def compute_metrics(eval_pred):
+    # Unpack predictions and labels
     predictions, labels = eval_pred
-    predictions = np.argmax(predictions, axis=1)
+
+    # Separate predictions for score and type
+    score_logits, type_logits = predictions
+    score_predictions = np.argmax(score_logits, axis=1)
+    type_predictions = np.argmax(type_logits, axis=1)
+
+    # Ensure labels are split correctly for score and type
+    score_labels, type_labels = labels[0], labels[1]
 
     return {
-        "accuracy": accuracy_score(labels, predictions),
-        "f1_macro": f1_score(labels, predictions, average='macro'),
-        "f1_weighted": f1_score(labels, predictions, average='weighted')
+        "score_accuracy": accuracy_score(score_labels, score_predictions),
+        "score_f1_weighted": f1_score(score_labels, score_predictions, average='weighted'),
+        "type_accuracy": accuracy_score(type_labels, type_predictions),
+        "type_f1_weighted": f1_score(type_labels, type_predictions, average='weighted'),
     }
 
 
 if __name__ == '__main__':
-    # MODEL_NAME = "sentence-transformers/all-roberta-large-v1"
-    MODEL_NAME = 'sentence-transformers/all-MiniLM-L6-v2'
+    MODEL_NAME = "roberta-base"
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
@@ -84,14 +186,10 @@ if __name__ == '__main__':
     train_dataset = prepare_dataset('data/Semeval2016/train/training.csv')
     valid_dataset = prepare_dataset('data/Semeval2016/train/validation.csv')
 
-    # Initialize model for classification
-    model = AutoModelForSequenceClassification.from_pretrained(
-        MODEL_NAME,
-        num_labels=6,
-        problem_type="single_label_classification"
-    )
+    # Initialize multi-task model
+    model = RobertaForMultiTaskClassification(MODEL_NAME, num_score_labels=6, num_type_labels=8)
 
-    # Define training arguments with memory optimizations
+    # Define training arguments
     training_args = TrainingArguments(
         output_dir="./results",
         eval_strategy="steps",
@@ -109,15 +207,15 @@ if __name__ == '__main__':
         logging_dir="./logs",
         logging_steps=50,
         load_best_model_at_end=True,
-        metric_for_best_model="f1_weighted",
+        metric_for_best_model="score_f1_weighted",
         greater_is_better=True,
         fp16=True,
         gradient_checkpointing=True,
         optim="adamw_torch"
     )
 
-    # Initialize trainer
-    trainer = Trainer(
+    # Initialize custom trainer
+    trainer = MultiTaskTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
@@ -132,5 +230,5 @@ if __name__ == '__main__':
     print(results)
 
     # Save model and tokenizer
-    model.save_pretrained("./trained_sroberta")
-    tokenizer.save_pretrained("./trained_sroberta")
+    model.save_pretrained("./trained_multi_task_roberta")
+    tokenizer.save_pretrained("./trained_multi_task_roberta")

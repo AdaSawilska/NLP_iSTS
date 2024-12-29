@@ -65,9 +65,9 @@ def export_to_wa_from_csv(csv_file, wa_output_file):
     grouped = df.groupby(['sentence1', 'sentence2'])
 
     with open(wa_output_file, 'w', encoding='utf-8') as wa_file:
-        for (sentence1, sentence2), group in grouped:
+        for sentence_idx, ((sentence1, sentence2), group) in enumerate(grouped, start=1):
             # Start a new <sentence> block
-            wa_file.write('<sentence id="{}" status="">\n'.format(group.index[0]))
+            wa_file.write(f'<sentence id="{sentence_idx}" status="">\n')
             wa_file.write(f"// {sentence1}\n")
             wa_file.write(f"// {sentence2}\n")
 
@@ -104,23 +104,32 @@ def export_to_wa_from_csv(csv_file, wa_output_file):
             for row in group.itertuples():
                 # Get the indexes of words in x1 and x2, or use 0 if chunk is empty or only contains "EMPTY"
                 if row.x1.strip() and any(word != "EMPTY" for word in row.x1.split()):
-                    x1_indexes = " ".join(str(idx) for idx, word in x1_to_index_map[row.x1])
+                    x1_indexes = " ".join(str(idx) for idx, word in x1_to_index_map.get(row.x1, []))
                 else:
                     x1_indexes = "0"
 
                 if row.x2.strip() and any(word != "EMPTY" for word in row.x2.split()):
-                    x2_indexes = " ".join(str(idx) for idx, word in x2_to_index_map[row.x2])
+                    x2_indexes = " ".join(str(idx) for idx, word in x2_to_index_map.get(row.x2, []))
                 else:
                     x2_indexes = "0"
 
+                # Validate alignment type (default to EQUI if not provided)
+                alignment_type = row.alignment_type if hasattr(row, 'alignment_type') and row.alignment_type in [
+                    "EQUI", "OPPO", "SPE1", "SPE2", "SIMI", "REL", "NOALI", "ALIC"] else "EQUI"
+
+                # Validate score (default to 5 or NIL for NOALI/ALIC)
+                if alignment_type in {"NOALI", "ALIC"}:
+                    score = "NIL"
+                else:
+                    score = row.predicted_score if hasattr(row, 'predicted_score') and 0 <= row.predicted_score <= 5 else 5
+
                 # Write the alignment line
-                alignment_type = row.alignment_type if hasattr(row, 'alignment_type') else "EQUI"  # Default to EQUI
-                score = row.predicted_score if hasattr(row, 'predicted_score') else "5"  # Default score
                 wa_file.write(f"{x1_indexes} <==> {x2_indexes} // {alignment_type} // {score} // {row.x1} <==> {row.x2}\n")
             wa_file.write("</alignment>\n")
 
             # Close the <sentence> block
             wa_file.write("</sentence>\n\n")
+
 
 
 
