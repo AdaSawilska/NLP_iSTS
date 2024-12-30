@@ -12,20 +12,15 @@ from transformers.modeling_outputs import SequenceClassifierOutput
 class RobertaForMultiTaskClassification(nn.Module):
     def __init__(self, model_name, num_score_labels=6, num_type_labels=4):
         super().__init__()
-        # Load the base RoBERTa model
         self.roberta = AutoModel.from_pretrained(model_name)
-
-        # Get the hidden size from the model config
         hidden_size = self.roberta.config.hidden_size
 
-        # Separate classification heads for score and type
         self.score_classifier = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
             nn.Tanh(),
             nn.Dropout(0.1),
             nn.Linear(hidden_size, num_score_labels)
         )
-
         self.type_classifier = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
             nn.Tanh(),
@@ -44,17 +39,14 @@ class RobertaForMultiTaskClassification(nn.Module):
             type_labels: Optional[torch.LongTensor] = None,
             return_dict: Optional[bool] = None,
     ) -> Union[Tuple, SequenceClassifierOutput]:
-        # Get RoBERTa outputs
         outputs = self.roberta(
             input_ids,
             attention_mask=attention_mask,
             return_dict=True
         )
 
-        # Get the [CLS] token output
         sequence_output = outputs.last_hidden_state[:, 0, :]
 
-        # Get predictions for both tasks
         score_logits = self.score_classifier(sequence_output)
         type_logits = self.type_classifier(sequence_output)
 
@@ -63,7 +55,6 @@ class RobertaForMultiTaskClassification(nn.Module):
             loss_fct = nn.CrossEntropyLoss()
             score_loss = loss_fct(score_logits.view(-1, score_logits.size(-1)), labels.view(-1))
             type_loss = loss_fct(type_logits.view(-1, type_logits.size(-1)), type_labels.view(-1))
-            # Combined loss (you can adjust the weights if needed)
             loss = score_loss + type_loss
 
         return SequenceClassifierOutput(
@@ -84,7 +75,6 @@ class RobertaForMultiTaskClassification(nn.Module):
 
 
 def preprocess_function(examples):
-    # Create text pairs by combining chunks and sentences
     texts = [
         f"{str(x1)} </s></s> {str(x2)} </s></s> {str(s1)} </s></s> {str(s2)}"
         for x1, x2, s1, s2 in zip(
@@ -94,8 +84,6 @@ def preprocess_function(examples):
             examples['sentence2']
         )
     ]
-
-    # Tokenize all texts at once
     tokenized = tokenizer(
         texts,
         padding=True,
@@ -103,8 +91,6 @@ def preprocess_function(examples):
         max_length=512,
         return_tensors=None
     )
-
-    # Convert scores and types to integer labels
     tokenized["labels"] = [int(score) for score in examples["y_score"]]
     tokenized["type_labels"] = [int(type_) for type_ in examples["y_type"]]
 
@@ -112,33 +98,21 @@ def preprocess_function(examples):
 
 
 def prepare_dataset(file_path):
-    # Read CSV
     df = pd.read_csv(file_path, sep=';')
 
-    # Clean and prepare data
     df["x1"] = df["x1"].fillna("EMPTY").astype(str)
     df["x2"] = df["x2"].fillna("EMPTY").astype(str)
     df["sentence1"] = df["sentence1"].fillna("EMPTY").astype(str)
     df["sentence2"] = df["sentence2"].fillna("EMPTY").astype(str)
 
-    # Process score labels
     df["y_score"] = df["y_score"].replace("NIL", 0).astype(float)
     df['y_score'] = pd.to_numeric(df['y_score'], errors='coerce')
-
-    # Process type labels (assuming categorical encoding)
     type_mapping = {'EQUI': 0, 'OPPO': 1, 'SPE1': 2, 'SPE2': 3,  'SIMI':4, 'REL':5, 'NOALI':6, 'ALIC':7}
     df['y_type'] = df['y_type'].map(type_mapping)
-
-    # Drop rows with missing values
     df.dropna(subset=['y_score', 'y_type'], inplace=True)
-
-    # Round float scores to nearest integer
     df['y_score'] = df['y_score'].round().astype(int)
 
-    # Convert to dataset
     dataset = Dataset.from_pandas(df)
-
-    # Apply preprocessing
     processed_dataset = dataset.map(
         preprocess_function,
         batched=True,

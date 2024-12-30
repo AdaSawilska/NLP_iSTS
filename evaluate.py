@@ -1,14 +1,89 @@
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, AutoConfig
 import pandas as pd
 import numpy as np
 from datasets import Dataset
 from sklearn.metrics import accuracy_score, f1_score
+from main import RobertaForMultiTaskClassification
+import torch
+from transformers import AutoTokenizer, AutoModel
+from torch import nn
+from transformers.modeling_outputs import SequenceClassifierOutput
 
-# Load the trained model and tokenizer
-MODEL_DIR = "./trained_sroberta"
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR)
-tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
+class RobertaForMultiTaskClassification(nn.Module):
+    def __init__(self, config, num_score_labels=6, num_type_labels=8):
+        super().__init__()
+        self.roberta = AutoModel.from_config(config)
+        hidden_size = config.hidden_size
+
+        self.score_classifier = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_size, num_score_labels)
+        )
+        self.type_classifier = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Dropout(0.1),
+            nn.Linear(hidden_size, num_type_labels)
+        )
+
+    def forward(self, input_ids=None, attention_mask=None, labels=None, type_labels=None, return_dict=None):
+        outputs = self.roberta(
+            input_ids,
+            attention_mask=attention_mask,
+            return_dict=True
+        )
+
+        sequence_output = outputs.last_hidden_state[:, 0, :]
+        score_logits = self.score_classifier(sequence_output)
+        type_logits = self.type_classifier(sequence_output)
+
+        # Pack both logits together as a tuple
+        combined_logits = (score_logits, type_logits)
+
+        return SequenceClassifierOutput(
+            loss=None,
+            logits=combined_logits,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+
+
+def load_trained_model(model_dir):
+    # Load the configuration
+    config = AutoConfig.from_pretrained(model_dir)
+
+    # Create model with the loaded config
+    model = RobertaForMultiTaskClassification(config)
+
+    # Load the classification heads
+    classification_heads = torch.load(
+        f"{model_dir}/classification_heads.pt",
+        map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    )
+    # Load the weights
+    model.score_classifier.load_state_dict(classification_heads['score_classifier'])
+    model.type_classifier.load_state_dict(classification_heads['type_classifier'])
+
+    # Set to evaluation mode
+    model.eval()
+
+    return model
+
+class MultiTaskTrainer(Trainer):
+    def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
+        has_labels = "labels" in inputs
+        inputs = self._prepare_inputs(inputs)
+
+        with torch.no_grad():
+            outputs = model(**inputs)
+            score_logits, type_logits = outputs.logits
+
+        return (None, (score_logits, type_logits), None)
+
+
+
 
 # Define the preprocessing function (reuse the same one used during training)
 def preprocess_function(examples):
@@ -132,28 +207,26 @@ def export_to_wa_from_csv(csv_file, wa_output_file):
 
 
 
+if __name__ == "__main__":
+    # Modified evaluation code
+    MODEL_DIR = "./trained_multi_task_roberta"
+    model = load_trained_model(MODEL_DIR)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
 
+    # Use the model for predictions
+    test_file = "data/Semeval2016/test/test_goldStandard/STSint.testinput.headlines.csv"
+    test_dataset, test_df = preprocess_test_data(test_file)
 
+    trainer = MultiTaskTrainer(model=model)
+    predictions = trainer.predict(test_dataset)
+    score_logits, type_logits = predictions.predictions
+    predicted_scores = np.argmax(score_logits, axis=1)
+    predicted_types = np.argmax(type_logits, axis=1)
 
+    # Add predictions to the DataFrame
+    test_df["predicted_score"] = predicted_scores
+    test_df["predicted_type"] = predicted_types
 
-
-# Load and preprocess test data
-test_file = "data/Semeval2016/test/test_goldStandard/STSint.testinput.headlines.csv"
-test_dataset, test_df = preprocess_test_data(test_file)
-
-# Initialize Trainer
-trainer = Trainer(model=model)
-
-# Predict using the model
-predictions = trainer.predict(test_dataset)
-predicted_scores = np.argmax(predictions.predictions, axis=1)
-
-# Add predictions to the DataFrame
-test_df["predicted_score"] = predicted_scores
-
-
-# Export predictions to .wa file
-output_wa_file = "predictions.wa"
-export_to_wa_from_csv(test_df, output_wa_file)
-
-
+    # Export predictions to .wa file
+    output_wa_file = "predictions.wa"
+    export_to_wa_from_csv(test_df, output_wa_file)
