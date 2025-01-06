@@ -59,8 +59,8 @@ class RobertaForMultiTaskClassification(nn.Module):
         score_features = self.score_projection(sequence_output)
         type_features = self.type_projection(sequence_output)
 
-        score_logits = self.score_classifier(sequence_output)
-        type_logits = self.type_classifier(sequence_output)
+        score_logits = self.score_classifier(score_features)
+        type_logits = self.type_classifier(type_features)
 
         loss = None
         if labels is not None and type_labels is not None:
@@ -73,7 +73,9 @@ class RobertaForMultiTaskClassification(nn.Module):
             loss1 = precision1 * score_loss + self.log_vars[0]
             precision2 = torch.exp(-self.log_vars[1])
             loss2 = precision2 * type_loss + self.log_vars[1]
-            loss = torch.mean(loss1 + loss2)
+            # Add regularization for log_vars
+            log_vars_reg = 0.1 * (self.log_vars[0] ** 2 + self.log_vars[1] ** 2)
+            loss = torch.mean(loss1 + loss2) + log_vars_reg
 
         return SequenceClassifierOutput(
             loss=loss,
@@ -83,23 +85,8 @@ class RobertaForMultiTaskClassification(nn.Module):
         )
 
     def save_pretrained(self, path):
+        torch.save(self.state_dict(), f"{path}/model.pt")
         self.roberta.save_pretrained(path)
-        torch.save({
-            'score_projection': self.score_projection.state_dict(),
-            'type_projection': self.type_projection.state_dict(),
-            'score_classifier': self.score_classifier.state_dict(),
-            'type_classifier': self.type_classifier.state_dict(),
-            'log_vars': self.log_vars
-        }, f"{path}/classification_heads.pt")
-
-    def load_pretrained(self, path):
-        self.roberta = AutoModel.from_pretrained(path)
-        checkpoint = torch.load(f"{path}/classification_heads.pt")
-        self.score_projection.load_state_dict(checkpoint['score_projection'])
-        self.type_projection.load_state_dict(checkpoint['type_projection'])
-        self.score_classifier.load_state_dict(checkpoint['score_classifier'])
-        self.type_classifier.load_state_dict(checkpoint['type_classifier'])
-        self.log_vars = checkpoint['log_vars']
 
 
 # Preprocess for RoBeRta
@@ -160,12 +147,46 @@ def print_distribution_stats(df):
     print("\nScore distribution:")
     print(df['y_score'].value_counts(normalize=True))
 
+
 class MultiTaskTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         labels = inputs.pop("labels")
         type_labels = inputs.pop("type_labels")
+
+        # Calculate class weights based on inverse frequency
+        score_weight = torch.tensor([
+            1.0 / 0.53,  # weight for score 0
+            1.0 / 0.005,  # weight for score 1
+            1.0 / 0.029,  # weight for score 2
+            1.0 / 0.056,  # weight for score 3
+            1.0 / 0.103,  # weight for score 4
+            1.0 / 0.28  # weight for score 5
+        ]).to(labels.device)
+
+        type_weight = torch.tensor([
+            1.0 / 0.28,  # weight for type 0 (EQUI)
+            1.0 / 0.005,  # weight for type 1 (OPPO)
+            1.0 / 0.048,  # weight for type 2 (SPE1)
+            1.0 / 0.046,  # weight for type 3 (SPE2)
+            1.0 / 0.068,  # weight for type 4 (SIMI)
+            1.0 / 0.025,  # weight for type 5 (REL)
+            1.0 / 0.526  # weight for type 6 (NOALI)
+        ]).to(labels.device)
+
+
         outputs = model(**inputs, labels=labels, type_labels=type_labels)
-        loss = outputs.loss
+        # Apply weighted loss
+        score_logits, type_logits = outputs.logits
+        loss_fct = nn.CrossEntropyLoss(weight=score_weight, reduction='none')
+        score_loss = loss_fct(score_logits.view(-1, score_logits.size(-1)), labels.view(-1))
+
+        loss_fct = nn.CrossEntropyLoss(weight=type_weight, reduction='none')
+        type_loss = loss_fct(type_logits.view(-1, type_logits.size(-1)), type_labels.view(-1))
+
+        loss = torch.mean(score_loss + type_loss)
+
+
+
         return (loss, outputs) if return_outputs else loss
 
 
@@ -212,7 +233,7 @@ if __name__ == '__main__':
         per_device_train_batch_size=8,
         per_device_eval_batch_size=8,
         gradient_accumulation_steps=4,
-        num_train_epochs=20,
+        num_train_epochs=10,
         warmup_ratio=0.1,
         warmup_steps=500,
         weight_decay=0.01,
@@ -244,5 +265,5 @@ if __name__ == '__main__':
     print(results)
 
     # Save model and tokenizer
-    model.save_pretrained("./trained_multi_task_roberta1")
-    tokenizer.save_pretrained("./trained_multi_task_roberta1")
+    model.save_pretrained("./trained_multi_task_roberta2")
+    tokenizer.save_pretrained("./trained_multi_task_roberta2")

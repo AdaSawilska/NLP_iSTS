@@ -3,27 +3,21 @@ from transformers import AutoTokenizer, AutoConfig, DataCollatorWithPadding
 import pandas as pd
 import numpy as np
 from datasets import Dataset
+from safetensors.torch import load_file
 from sklearn.metrics import accuracy_score, f1_score
 import torch
 from typing import Tuple
 from main import RobertaForMultiTaskClassification  # Import from your main module
 
 
-def load_trained_model(model_path: str) -> RobertaForMultiTaskClassification:
+def load_trained_model(model_path: str):
     """Load the trained multi-task model"""
-    model = RobertaForMultiTaskClassification("roberta-base", num_score_labels=6, num_type_labels=7)
+    model = RobertaForMultiTaskClassification("roberta-base",
+                                              num_score_labels=6,
+                                              num_type_labels=7)
 
-    # Load the saved weights
-    checkpoint = torch.load(
-        f"{model_path}/classification_heads.pt",
-        map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    )
-
-    model.score_projection.load_state_dict(checkpoint['score_projection'])
-    model.type_projection.load_state_dict(checkpoint['type_projection'])
-    model.score_classifier.load_state_dict(checkpoint['score_classifier'])
-    model.type_classifier.load_state_dict(checkpoint['type_classifier'])
-    model.log_vars = checkpoint['log_vars']
+    state_dict = torch.load(f"{model_path}/model.pt")
+    model.load_state_dict(state_dict, strict=True)
 
     # Set to evaluation mode
     model.eval()
@@ -35,6 +29,9 @@ def validate_model_loading(model_path: str):
     for name, param in model.named_parameters():
         if param.requires_grad and param.sum().item() == 0:
             print(f"Warning: Parameter {name} seems to be uninitialized or zeroed out.")
+        if torch.sum(param.data) == 0:
+            print(f"Parameter {name} is still uninitialized.")
+
     return model
 
 
@@ -64,7 +61,7 @@ def preprocess_test_data(test_file: str, tokenizer) -> Tuple[Dataset, pd.DataFra
         df = pd.read_csv(test_file)
     except:
         # Try with different separator if default fails
-        df = pd.read_csv(test_file, sep='\t')
+        df = pd.read_csv(test_file, sep=';')
 
     df["x1"] = df["x1"].fillna("EMPTY").astype(str)
     df["x2"] = df["x2"].fillna("EMPTY").astype(str)
@@ -168,9 +165,11 @@ if __name__ == "__main__":
     MODEL_PATH = "./trained_multi_task_roberta1"  # Update with your model path
     model = validate_model_loading(MODEL_PATH)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+    print(model)
+    print(tokenizer)
 
     # Load and preprocess test data
-    test_file = "data/Semeval2016/train/train_healines_images_students.csv"  # Update with your test file path
+    test_file = "data/Semeval2016/train/training.csv"  # Update with your test file path
     test_dataset, test_df = preprocess_test_data(test_file, tokenizer)
 
     # Get predictions
@@ -180,9 +179,9 @@ if __name__ == "__main__":
     test_df["predicted_score"] = predicted_scores
     test_df["predicted_type"] = predicted_types
 
-    # # Export to WA format
-    # output_wa_file = "predictions.wa"
-    # export_to_wa_format(test_df, output_wa_file)
+    # Export to WA format
+    output_wa_file = "predictions.wa"
+    export_to_wa_format(test_df, output_wa_file)
     #
     # # Print some sample predictions
     # print("\nSample predictions:")
