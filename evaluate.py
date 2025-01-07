@@ -61,7 +61,7 @@ def preprocess_test_data(test_file: str, tokenizer) -> Tuple[Dataset, pd.DataFra
         df = pd.read_csv(test_file)
     except:
         # Try with different separator if default fails
-        df = pd.read_csv(test_file, sep=';')
+        df = pd.read_csv(test_file, sep=',')
 
     df["x1"] = df["x1"].fillna("EMPTY").astype(str)
     df["x2"] = df["x2"].fillna("EMPTY").astype(str)
@@ -162,14 +162,14 @@ def export_to_wa_format(df: pd.DataFrame, output_file: str):
 
 if __name__ == "__main__":
     # Load model and tokenizer
-    MODEL_PATH = "./trained_multi_task_roberta1"  # Update with your model path
+    MODEL_PATH = "./trained_multi_task_roberta2"  # Update with your model path
     model = validate_model_loading(MODEL_PATH)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
     print(model)
     print(tokenizer)
 
     # Load and preprocess test data
-    test_file = "data/Semeval2016/train/training.csv"  # Update with your test file path
+    test_file = "data/Semeval2016/test/test_goldStandard/STSint.testinput.headlines.csv"  # Update with your test file path
     test_dataset, test_df = preprocess_test_data(test_file, tokenizer)
 
     # Get predictions
@@ -180,7 +180,7 @@ if __name__ == "__main__":
     test_df["predicted_type"] = predicted_types
 
     # Export to WA format
-    output_wa_file = "predictions.wa"
+    output_wa_file = "predictions_headlines.wa"
     export_to_wa_format(test_df, output_wa_file)
     #
     # # Print some sample predictions

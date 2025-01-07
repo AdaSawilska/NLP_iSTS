@@ -1,3 +1,5 @@
+import os
+
 import torch
 from transformers import AutoTokenizer, AutoModel, AutoModelForSequenceClassification, Trainer, TrainingArguments
 from datasets import Dataset
@@ -85,8 +87,11 @@ class RobertaForMultiTaskClassification(nn.Module):
         )
 
     def save_pretrained(self, path):
-        torch.save(self.state_dict(), f"{path}/model.pt")
+        if not os.path.exists(path):
+            os.makedirs(path)
         self.roberta.save_pretrained(path)
+        torch.save(self.state_dict(), f"{path}/model.pt")
+
 
 
 # Preprocess for RoBeRta
@@ -114,7 +119,7 @@ def preprocess_function(examples):
 
 
 def prepare_dataset(file_path):
-    df = pd.read_csv(file_path, sep='\t')
+    df = pd.read_csv(file_path, sep=';')
 
     df["x1"] = df["x1"].fillna("EMPTY").astype(str)
     df["x2"] = df["x2"].fillna("EMPTY").astype(str)
@@ -233,7 +238,7 @@ if __name__ == '__main__':
         per_device_train_batch_size=8,
         per_device_eval_batch_size=8,
         gradient_accumulation_steps=4,
-        num_train_epochs=10,
+        num_train_epochs=20,
         warmup_ratio=0.1,
         warmup_steps=500,
         weight_decay=0.01,
@@ -265,5 +270,5 @@ if __name__ == '__main__':
     print(results)
 
     # Save model and tokenizer
-    model.save_pretrained("./trained_multi_task_roberta2")
-    tokenizer.save_pretrained("./trained_multi_task_roberta2")
+    model.save_pretrained("./trained_multi_task_roberta3")
+    tokenizer.save_pretrained("./trained_multi_task_roberta3")
