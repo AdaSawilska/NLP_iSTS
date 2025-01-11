@@ -5,3 +5,4 @@ scikit-learn>=1.2.0
 torch>=2.0.0
 yacs==0.1.8
 transformers~=4.47.0
+datasets

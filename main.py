@@ -1,7 +1,7 @@
 import os
 
 import torch
-from transformers import AutoTokenizer, AutoModel, AutoModelForSequenceClassification, Trainer, TrainingArguments
+from transformers import AutoTokenizer, AutoModel, Trainer, TrainingArguments
 from datasets import Dataset
 import pandas as pd
 from sklearn.metrics import accuracy_score, f1_score
@@ -270,5 +270,5 @@ if __name__ == '__main__':
     print(results)
 
     # Save model and tokenizer
-    model.save_pretrained("./trained_multi_task_roberta4")
-    tokenizer.save_pretrained("./trained_multi_task_roberta4")
+    model.save_pretrained("./trained_multi_task_roberta")
+    tokenizer.save_pretrained("./trained_multi_task_roberta")
