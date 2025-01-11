@@ -5,7 +5,6 @@
 -  [Requirements](#requirements)
 -  [Datasets](#datasets)
 -  [Training model](#training-model)
--  [Testing model](#testing-model)
 -  [Testing model with SemEval scripts](#testing-model-with-semeval-scripts)
 
 
