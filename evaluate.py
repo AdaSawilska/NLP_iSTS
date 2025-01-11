@@ -109,7 +109,7 @@ def get_predictions(model, dataset) -> Tuple[np.ndarray, np.ndarray]:
 def export_to_wa_format(df: pd.DataFrame, output_file: str):
     """Export predictions to WA format"""
     type_mapping = {0: 'EQUI', 1: 'OPPO', 2: 'SPE1', 3: 'SPE2',
-                    4: 'SIMI', 5: 'REL', 6: 'NOALI', 7: 'ALIC'}
+                    4: 'SIMI', 5: 'REL', 6: 'NOALI'}
 
     df['alignment_type'] = df['predicted_type'].map(type_mapping)
 
@@ -162,14 +162,14 @@ def export_to_wa_format(df: pd.DataFrame, output_file: str):
 
 if __name__ == "__main__":
     # Load model and tokenizer
-    MODEL_PATH = "./trained_multi_task_roberta2"  # Update with your model path
+    MODEL_PATH = "./trained_multi_task_roberta3"  # Update with your model path
     model = validate_model_loading(MODEL_PATH)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
     print(model)
     print(tokenizer)
 
     # Load and preprocess test data
-    test_file = "data/Semeval2016/test/test_goldStandard/STSint.testinput.headlines.csv"  # Update with your test file path
+    test_file = "data/Semeval2016/test/test_goldStandard/STSint.testinput.images.csv"  # Update with your test file path
     test_dataset, test_df = preprocess_test_data(test_file, tokenizer)
 
     # Get predictions
@@ -179,15 +179,5 @@ if __name__ == "__main__":
     test_df["predicted_score"] = predicted_scores
     test_df["predicted_type"] = predicted_types
 
-    # Export to WA format
-    output_wa_file = "predictions_headlines.wa"
-    export_to_wa_format(test_df, output_wa_file)
-    #
-    # # Print some sample predictions
-    # print("\nSample predictions:")
-    # for i in range(min(5, len(test_df))):
-    #     print(f"\nPrediction {i + 1}:")
-    #     print(f"Sentence 1: {test_df.iloc[i]['sentence1']}")
-    #     print(f"Sentence 2: {test_df.iloc[i]['sentence2']}")
-    #     print(f"Predicted Score: {predicted_scores[i]}")
-    #     print(f"Predicted Type: {predicted_types[i]}")
+    test_df.to_csv('predictions_test_images.csv', index=False)  # index=False to avoid saving the index column
+

@@ -119,7 +119,7 @@ def preprocess_function(examples):
 
 
 def prepare_dataset(file_path):
-    df = pd.read_csv(file_path, sep=';')
+    df = pd.read_csv(file_path, sep='\t')
 
     df["x1"] = df["x1"].fillna("EMPTY").astype(str)
     df["x2"] = df["x2"].fillna("EMPTY").astype(str)
@@ -270,5 +270,5 @@ if __name__ == '__main__':
     print(results)
 
     # Save model and tokenizer
-    model.save_pretrained("./trained_multi_task_roberta3")
-    tokenizer.save_pretrained("./trained_multi_task_roberta3")
+    model.save_pretrained("./trained_multi_task_roberta4")
+    tokenizer.save_pretrained("./trained_multi_task_roberta4")
