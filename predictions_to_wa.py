@@ -97,7 +97,7 @@ def create_wa_file_from_predictions(df, gt_file, output_file):
 
 
 if __name__ == "__main__":
-    df = pd.read_csv('predictions_test_images.csv')
+    df = pd.read_csv('results/predictions_test_images.csv')
     create_wa_file_from_predictions(df,
                                     'data/Semeval2016/test/test_goldStandard/STSint.testinput.images.wa',
-                                    'predictions_test_images.wa')
+                                    'results/predictions_test_images.wa')

@@ -72,7 +72,7 @@ def calculate_metrics(data):
     print(f"Overall Accuracy (Type + Score): {overall_accuracy}")
 
 if __name__ == "__main__":
-    csv_path = "predictions_test_images.csv"
+    csv_path = "results/predictions_test_images.csv"
     df = pd.read_csv(csv_path, sep=',')
     df_prepared = prepare_dataframe(df)
     calculate_metrics(df_prepared)
