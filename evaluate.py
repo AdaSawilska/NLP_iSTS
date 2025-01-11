@@ -1,16 +1,17 @@
 from torch.utils.data import DataLoader
-from transformers import AutoTokenizer, AutoConfig, DataCollatorWithPadding
+from transformers import AutoTokenizer, DataCollatorWithPadding
 import pandas as pd
 import numpy as np
 from datasets import Dataset
-from safetensors.torch import load_file
-from sklearn.metrics import accuracy_score, f1_score
 import torch
 from typing import Tuple
-from main import RobertaForMultiTaskClassification  # Import from your main module
+
+from calculate_metrics import prepare_dataframe, calculate_metrics
+from main import RobertaForMultiTaskClassification
+from predictions_to_wa import create_wa_file_from_predictions
 
 
-def load_trained_model(model_path: str):
+def load_trained_model(model_path):
     """Load the trained multi-task model"""
     model = RobertaForMultiTaskClassification("roberta-base",
                                               num_score_labels=6,
@@ -23,7 +24,7 @@ def load_trained_model(model_path: str):
     model.eval()
     return model
 
-def validate_model_loading(model_path: str):
+def validate_model_loading(model_path):
     """Sanity check model loading by verifying weights are loaded."""
     model = load_trained_model(model_path)
     for name, param in model.named_parameters():
@@ -55,12 +56,11 @@ def preprocess_function(examples, tokenizer):
     )
 
 
-def preprocess_test_data(test_file: str, tokenizer) -> Tuple[Dataset, pd.DataFrame]:
-    """Preprocess test data for evaluation"""
+def preprocess_test_data(test_file: str, tokenizer):
+    """Load test data and preprocess"""
     try:
         df = pd.read_csv(test_file)
     except:
-        # Try with different separator if default fails
         df = pd.read_csv(test_file, sep=',')
 
     df["x1"] = df["x1"].fillna("EMPTY").astype(str)
@@ -79,11 +79,9 @@ def preprocess_test_data(test_file: str, tokenizer) -> Tuple[Dataset, pd.DataFra
 
 
 def get_predictions(model, dataset) -> Tuple[np.ndarray, np.ndarray]:
-    """Get predictions from the model"""
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
 
-    # Use a data collator to handle padding dynamically
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer, return_tensors="pt")
     dataloader = DataLoader(dataset, batch_size=32, collate_fn=data_collator)
 
@@ -106,71 +104,22 @@ def get_predictions(model, dataset) -> Tuple[np.ndarray, np.ndarray]:
     return np.array(all_score_preds), np.array(all_type_preds)
 
 
-def export_to_wa_format(df: pd.DataFrame, output_file: str):
-    """Export predictions to WA format"""
-    type_mapping = {0: 'EQUI', 1: 'OPPO', 2: 'SPE1', 3: 'SPE2',
-                    4: 'SIMI', 5: 'REL', 6: 'NOALI'}
-
-    df['alignment_type'] = df['predicted_type'].map(type_mapping)
-
-    with open(output_file, 'w', encoding='utf-8') as wa_file:
-        for sentence_idx, ((sentence1, sentence2), group) in enumerate(
-                df.groupby(['sentence1', 'sentence2']), start=1
-        ):
-            wa_file.write(f'<sentence id="{sentence_idx}" status="">\n')
-            wa_file.write(f"// {sentence1}\n")
-            wa_file.write(f"// {sentence2}\n")
-
-            # Write source
-            wa_file.write("<source>\n")
-            source_words = {}
-            idx = 1
-            for row in group.itertuples():
-                if row.x1.strip() and row.x1 != "EMPTY":
-                    words = row.x1.split()
-                    source_words[row.x1] = list(range(idx, idx + len(words)))
-                    for word_idx, word in enumerate(words, idx):
-                        wa_file.write(f"{word_idx} {word} : \n")
-                    idx += len(words)
-            wa_file.write("</source>\n")
-
-            # Write translation
-            wa_file.write("<translation>\n")
-            target_words = {}
-            idx = 1
-            for row in group.itertuples():
-                if row.x2.strip() and row.x2 != "EMPTY":
-                    words = row.x2.split()
-                    target_words[row.x2] = list(range(idx, idx + len(words)))
-                    for word_idx, word in enumerate(words, idx):
-                        wa_file.write(f"{word_idx} {word} : \n")
-                    idx += len(words)
-            wa_file.write("</translation>\n")
-
-            # Write alignments
-            wa_file.write("<alignment>\n")
-            for row in group.itertuples():
-                source_indices = " ".join(map(str, source_words.get(row.x1, ["0"])))
-                target_indices = " ".join(map(str, target_words.get(row.x2, ["0"])))
-                score = "NIL" if row.alignment_type in ["NOALI", "ALIC"] else str(row.predicted_score)
-                wa_file.write(
-                    f"{source_indices} <==> {target_indices} // {row.alignment_type} // {score} // {row.x1} <==> {row.x2}\n")
-            wa_file.write("</alignment>\n")
-
-            wa_file.write("</sentence>\n\n")
-
-
 if __name__ == "__main__":
+    # Variables to adjust
+    MODEL_PATH = "./trained_multi_task_roberta3"
+    GT = "data/Semeval2016/test/test_goldStandard/STSint.testinput.images.wa"
+    TEST_FILE = "data/Semeval2016/test/test_goldStandard/STSint.testinput.images.csv"
+    OUTPUT_WA = 'predictions_test_images.wa'
+
+
     # Load model and tokenizer
-    MODEL_PATH = "./trained_multi_task_roberta3"  # Update with your model path
     model = validate_model_loading(MODEL_PATH)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
     print(model)
     print(tokenizer)
 
     # Load and preprocess test data
-    test_file = "data/Semeval2016/test/test_goldStandard/STSint.testinput.images.csv"  # Update with your test file path
-    test_dataset, test_df = preprocess_test_data(test_file, tokenizer)
+    test_dataset, test_df = preprocess_test_data(TEST_FILE, tokenizer)
 
     # Get predictions
     predicted_scores, predicted_types = get_predictions(model, test_dataset)
@@ -179,5 +128,13 @@ if __name__ == "__main__":
     test_df["predicted_score"] = predicted_scores
     test_df["predicted_type"] = predicted_types
 
-    test_df.to_csv('predictions_test_images.csv', index=False)  # index=False to avoid saving the index column
+    # Save to .csv
+    test_df.to_csv('predictions_test_images.csv', index=False)
+
+    # Save to .wa
+    create_wa_file_from_predictions(test_df, GT, OUTPUT_WA)
+
+    # Calculate metrics
+    df_prepared = prepare_dataframe(test_df)
+    calculate_metrics(df_prepared)
 

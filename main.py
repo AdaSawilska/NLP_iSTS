@@ -11,6 +11,9 @@ from torch import nn
 from typing import Optional, Tuple, Union
 from transformers.modeling_outputs import SequenceClassifierOutput
 
+from histogram import dataset_histogram
+
+
 # Model
 class RobertaForMultiTaskClassification(nn.Module):
     def __init__(self, model_name, num_score_labels=6, num_type_labels=7):
@@ -118,9 +121,8 @@ def preprocess_function(examples):
     return tokenized
 
 
-def prepare_dataset(file_path):
+def prepare_dataset(file_path, flag):
     df = pd.read_csv(file_path, sep='\t')
-
     df["x1"] = df["x1"].fillna("EMPTY").astype(str)
     df["x2"] = df["x2"].fillna("EMPTY").astype(str)
     df["sentence1"] = df["sentence1"].fillna("EMPTY").astype(str)
@@ -139,18 +141,24 @@ def prepare_dataset(file_path):
         batched=True,
         remove_columns=dataset.column_names
     )
-
-    print_distribution_stats(df)
-
-
+    print_distribution_stats(df, type_mapping, flag)
     return processed_dataset
-def print_distribution_stats(df):
-    """Print distribution statistics for the dataset"""
+
+def print_distribution_stats(df, type_mapping, flag):
     print(f"Total samples: {len(df)}")
     print("\nType distribution:")
-    print(df['y_type'].value_counts(normalize=True))
+    type = df['y_type'].value_counts(normalize=True)
+    print(type)
     print("\nScore distribution:")
-    print(df['y_score'].value_counts(normalize=True))
+    score = df['y_score'].value_counts(normalize=True)
+    print(score)
+    if flag == "train":
+        dataset_histogram(type, score, len(df), type_mapping, flag, color='skyblue')
+    else:
+        dataset_histogram(type, score, len(df), type_mapping, flag, color='salmon')
+
+
+
 
 
 class MultiTaskTrainer(Trainer):
@@ -178,33 +186,25 @@ class MultiTaskTrainer(Trainer):
             1.0 / 0.526  # weight for type 6 (NOALI)
         ]).to(labels.device)
 
-
         outputs = model(**inputs, labels=labels, type_labels=type_labels)
-        # Apply weighted loss
+
         score_logits, type_logits = outputs.logits
         loss_fct = nn.CrossEntropyLoss(weight=score_weight, reduction='none')
         score_loss = loss_fct(score_logits.view(-1, score_logits.size(-1)), labels.view(-1))
-
         loss_fct = nn.CrossEntropyLoss(weight=type_weight, reduction='none')
         type_loss = loss_fct(type_logits.view(-1, type_logits.size(-1)), type_labels.view(-1))
-
         loss = torch.mean(score_loss + type_loss)
-
-
 
         return (loss, outputs) if return_outputs else loss
 
 
 def compute_metrics(eval_pred):
-    # Unpack predictions and labels
     predictions, labels = eval_pred
 
-    # Separate predictions for score and type
     score_logits, type_logits = predictions
     score_predictions = np.argmax(score_logits, axis=1)
     type_predictions = np.argmax(type_logits, axis=1)
 
-    # Ensure labels are split correctly for score and type
     score_labels, type_labels = labels[0], labels[1]
 
     return {
@@ -221,8 +221,8 @@ if __name__ == '__main__':
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
     # Prepare datasets
-    train_dataset = prepare_dataset('data/Semeval2016/train/train_healines_images_students.csv')
-    valid_dataset = prepare_dataset('data/Semeval2016/train/validation_healines_images_students.csv')
+    train_dataset = prepare_dataset('data/Semeval2016/train/train_healines_images_students.csv', "train")
+    valid_dataset = prepare_dataset('data/Semeval2016/train/validation_healines_images_students.csv', "val")
 
     # Initialize multi-task model
     model = RobertaForMultiTaskClassification(MODEL_NAME, num_score_labels=6, num_type_labels=7)

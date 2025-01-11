@@ -4,6 +4,7 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import matplotlib.pyplot as plt
 
 def prepare_dataframe(df):
+    """Prepares dataframe for calculations."""
     type_mapping = {0: 'EQUI', 1: 'OPPO', 2: 'SPE1', 3: 'SPE2',
                     4: 'SIMI', 5: 'REL', 6: 'NOALI'}
 
@@ -15,6 +16,7 @@ def prepare_dataframe(df):
     return df
 
 def calculate_metrics(data):
+    """Calculates metrics of accuracy, precision, recall, f1 score for predictions."""
     real_scores = data['y_score']
     predicted_scores = data['predicted_score']
 
@@ -24,7 +26,6 @@ def calculate_metrics(data):
     disp.plot(cmap='RdPu', ax=ax)
     plt.show()
 
-    # pearson_corr_score, _ = pearsonr(real_scores, predicted_scores)
     accuracy_scr = accuracy_score(real_scores, predicted_scores)
     precision_scr = precision_score(real_scores, predicted_scores, average='weighted', zero_division=0)
     recall_scr = recall_score(real_scores, predicted_scores, average='weighted', zero_division=0)
@@ -62,7 +63,6 @@ def calculate_metrics(data):
         }
     }
 
-    # Wyświetl wyniki
     print("Miary dla wyników (Score):")
     print(results['Score Metrics'])
 

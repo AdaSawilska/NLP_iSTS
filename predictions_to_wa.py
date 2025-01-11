@@ -47,11 +47,10 @@ def get_indices_from_words(word_string, token_map):
     """Get indices for words in the order they appear."""
 
     words = str(word_string).split()
-    current_position = 1  # Start checking from index 1
+    current_position = 1
     indices = []
 
     for word in words:
-        # Find next occurrence of the word starting from current_position
         while current_position <= max(token_map.keys()):
             if token_map.get(current_position) == word:
                 indices.append(str(current_position))
@@ -84,7 +83,6 @@ def create_wa_file_from_predictions(df, gt_file, output_file):
             f.write('<alignment>\n')
 
             for _, row in group.iterrows():
-                # Clean indices before processing
                 src_words = str(row['x1'])
                 tgt_words = str(row['x2'])
 
