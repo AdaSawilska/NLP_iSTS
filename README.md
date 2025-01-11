@@ -40,20 +40,20 @@ There are 3 perl scripts created by competition organizers:
 Obtained model was tested separately on each testing dataset and the results are shown below:
 
 Results Using evalF1_no_penalty.pl
-|                   |     „News Headlines”    |     „Images Captions”    |     „Answers-Students”    |   |
-|-------------------|-------------------------|--------------------------|---------------------------|---|
-|     F1   Ali      |     0.9929              |     0.9843               |     0.9812                |   |
-|     F1   Type     |     0.7768              |     0.7731               |     0.8414                |   |
-|     F1   Score    |     0.9387              |     0.9331               |     0.9341                |   |
-|     F1 Typ+Sco    |     0.7574              |     0.7531               |     0.8211                |   |
+|                   |     „News Headlines”    |     „Images Captions”    |     „Answers-Students”    |
+|-------------------|-------------------------|--------------------------|---------------------------|
+|     F1   Ali      |     0.9929              |     0.9843               |     0.9812                |
+|     F1   Type     |     0.7768              |     0.7731               |     0.8414                |
+|     F1   Score    |     0.9387              |     0.9331               |     0.9341                |
+|     F1 Typ+Sco    |     0.7574              |     0.7531               |     0.8211                |
 
 Results Using evalF1_penalty.pl
-|                   |     „News Headlines”    |     „Images Captions”    |     „Answers-Students”    |   |
-|-------------------|-------------------------|--------------------------|---------------------------|---|
-|     F1   Ali      |     0.9929              |     0.9843               |     0.9812                |   |
-|     F1   Type     |     0.7768              |     0.7731               |     0.8414                |   |
-|     F1   Score    |     0.9387              |     0.9331               |     0.9341                |   |
-|     F1 Typ+Sco    |     0.8267              |     0.8008               |     0.8506                |   |
+|                   |     „News Headlines”    |     „Images Captions”    |     „Answers-Students”    |
+|-------------------|-------------------------|--------------------------|---------------------------|
+|     F1   Ali      |     0.9929              |     0.9843               |     0.9812                |
+|     F1   Type     |     0.7768              |     0.7731               |     0.8414                |
+|     F1   Score    |     0.9387              |     0.9331               |     0.9341                |
+|     F1 Typ+Sco    |     0.8267              |     0.8008               |     0.8506                |
 
 
 
